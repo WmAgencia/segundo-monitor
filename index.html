@@ -14,8 +14,33 @@ let fit=storage.get('fit','contain');if(!['contain','cover'].includes(fit))fit='
 let stream=null,requestVersion=0,busy=false,resizeObserver=null;
 const profiles={fast:{width:1280,height:720,frameRate:60},balanced:{width:1920,height:1080,frameRate:60},quality:{width:1920,height:1080,frameRate:30},uhd:{width:3840,height:2160,frameRate:30},auto:null};
 const profileSelect=$('profile');let profile=storage.get('profile','fast');if(!(profile in profiles))profile='fast';profileSelect.value=profile;
-let frameMonitorToken=0,frames=0,lastFrameTime=0,lastPaint=0;
-function monitorFrames(){const token=++frameMonitorToken;frames=0;lastFrameTime=performance.now();lastPaint=0;if(!('requestVideoFrameCallback' in video))return;const onFrame=(now,metadata)=>{if(token!==frameMonitorToken||!stream)return;frames++;if(now-lastFrameTime>=1500){const fps=(frames*1000/(now-lastFrameTime)).toFixed(1);const dropped=typeof metadata.presentedFrames==='number'&&lastPaint?Math.max(0,metadata.presentedFrames-lastPaint-frames):null;$('metrics').textContent=`Exibição: ${fps} fps`+(dropped!==null?` · perdas estimadas: ${dropped}`:'');lastFrameTime=now;lastPaint=metadata.presentedFrames||0;frames=0}video.requestVideoFrameCallback(onFrame)};video.requestVideoFrameCallback(onFrame)}
+let frameMonitorToken=0;
+function monitorFrames(){
+ const token=++frameMonitorToken;
+ if(!('requestVideoFrameCallback' in video)){$('metrics').textContent='Medição de FPS indisponível neste navegador';return}
+ let frames=0,lastSample=performance.now(),previousMediaTime=null,previousPresented=null,gaps=0,missing=0,intervals=[];
+ const onFrame=(now,metadata)=>{
+  if(token!==frameMonitorToken||!stream)return;
+  frames++;
+  if(previousPresented!==null&&Number.isFinite(metadata.presentedFrames))missing+=Math.max(0,metadata.presentedFrames-previousPresented-1);
+  if(Number.isFinite(metadata.presentedFrames))previousPresented=metadata.presentedFrames;
+  if(previousMediaTime!==null&&Number.isFinite(metadata.mediaTime)){
+   const delta=(metadata.mediaTime-previousMediaTime)*1000;
+   if(delta>0&&delta<1000){intervals.push(delta);if(intervals.length>150)intervals.shift();if(delta>45)gaps++}
+  }
+  if(Number.isFinite(metadata.mediaTime))previousMediaTime=metadata.mediaTime;
+  const elapsed=now-lastSample;
+  if(elapsed>=2000){
+   const fps=(frames*1000/elapsed).toFixed(1);
+   const sorted=[...intervals].sort((x,y)=>x-y);
+   const p95=sorted.length?sorted[Math.min(sorted.length-1,Math.floor(sorted.length*.95))].toFixed(0):'?';
+   $('metrics').textContent=`Exibição: ${fps} fps · P95 intervalo: ${p95} ms · saltos >45ms: ${gaps} · quadros pulados: ${missing}`;
+   frames=0;gaps=0;missing=0;intervals=[];lastSample=now;
+  }
+  video.requestVideoFrameCallback(onFrame);
+ };
+ video.requestVideoFrameCallback(onFrame);
+}
 function setStatus(message){status.textContent=message}
 function setHint(message){hint.textContent=message;hint.hidden=false;hint.style.display='grid'}
 function updateLabels(){$('rotate').textContent=`Girar 90° (${angle}°)`;$('fit').textContent=`Ajuste: ${fit==='contain'?'conter':'preencher'}`}
